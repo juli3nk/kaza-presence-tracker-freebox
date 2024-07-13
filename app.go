@@ -9,11 +9,8 @@ import (
 	"github.com/juli3nk/go-freebox"
 )
 
-func getAppToken(dev *freebox.Device, appID string) (*string, error) {
-	var appToken string
-
-	appTokenBytes, err := getAppTokenFromFile()
-	if err != nil {
+func getAppToken(st *state, dev *freebox.Device, appID string) error {
+	if _, err := st.getAppTokenFromFile(); err != nil {
 		tokenReq := freebox.TokenRequest{
 			AppID:      appID,
 			AppName:    "Presence Tracker",
@@ -23,19 +20,19 @@ func getAppToken(dev *freebox.Device, appID string) (*string, error) {
 
 		jsonData, err := json.Marshal(tokenReq)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		response, err := dev.RequestAuthorization(bytes.NewBuffer(jsonData))
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		c := time.Tick(10 * time.Second)
 		for _ = range c {
 			status, err := dev.TrackAuthorizationProgress(response.Result.TrackID)
 			if err != nil {
-				return nil, err
+				return err
 			}
 
 			if status.Result.Status == freebox.AuthorizationStatusGranted {
@@ -43,40 +40,43 @@ func getAppToken(dev *freebox.Device, appID string) (*string, error) {
 			}
 		}
 
-		if err := saveAppTokenToFile(response.Result.AppToken); err != nil {
-			return nil, err
+		if err := st.saveAppTokenToFile(response.Result.AppToken); err != nil {
+			return err
 		}
 
-		appTokenBytes, err = getAppTokenFromFile()
-		if err != nil {
-			return nil, err
+		if _, err = st.getAppTokenFromFile(); err != nil {
+			return err
 		}
 	}
-	appToken = string(appTokenBytes)
 
-	return &appToken, nil
+	return nil
 }
 
-func getSessionToken(dev *freebox.Device, appID, appToken string) (*string, error) {
+func getSessionToken(st *state, dev *freebox.Device, appID string) (*string, error) {
 	var sessionToken string
 
-	sessionTokenBytes, err := getSessionTokenFromFile()
+	appTokenBytes, err := st.getAppTokenFromFile()
+	if err != nil {
+		return nil, err
+	}
+
+	sessionTokenBytes, err := st.getSessionTokenFromFile()
 	if err != nil {
 		challenge, err := dev.GetChallenge()
 		if err != nil {
 			return nil, err
 		}
 
-		session, err := dev.OpenSession(appID, appToken, challenge.Result.Challenge)
+		session, err := dev.OpenSession(appID, string(appTokenBytes), challenge.Result.Challenge)
 		if err != nil {
 			return nil, err
 		}
 
-		if err := saveSessionTokenToFile(session.Result.SessionToken); err != nil {
+		if err := st.saveSessionTokenToFile(session.Result.SessionToken); err != nil {
 			return nil, err
 		}
 
-		sessionTokenBytes, err = getSessionTokenFromFile()
+		sessionTokenBytes, err = st.getSessionTokenFromFile()
 		if err != nil {
 			return nil, err
 		}

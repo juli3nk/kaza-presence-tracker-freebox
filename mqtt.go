@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/eclipse/paho.mqtt.golang"
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 func mqttInit(host string, port uint16, username, password string) (mqtt.Client, error) {

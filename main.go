@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/juli3nk/go-freebox"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -20,25 +21,25 @@ type stateVal struct {
 	status string
 }
 
-type hassDevice struct {
-	Connections []string `json:"connections"`
-	Name        string   `json:"name"`
-}
+// type hassDevice struct {
+// 	Connections []string `json:"connections"`
+// 	Name        string   `json:"name"`
+// }
 
 type mqttPayload struct {
-	StateTopic          string     `json:"state_topic"`
-	Name                string     `json:"name"`
-	PayloadHome         string     `json:"payload_home"`
-	PayloadNotHome      string     `json:"payload_not_home"`
+	StateTopic     string `json:"state_topic"`
+	Name           string `json:"name"`
+	PayloadHome    string `json:"payload_home"`
+	PayloadNotHome string `json:"payload_not_home"`
 	//Device              hassDevice `json:"device,omitempty"`
-	Icon                string     `json:"icon"`
-	UniqueId            string     `json:"unique_id"`
-	JsonAttributesTopic string     `json:"json_attributes_topic,omitempty"`
+	Icon                string `json:"icon"`
+	UniqueId            string `json:"unique_id"`
+	JsonAttributesTopic string `json:"json_attributes_topic,omitempty"`
 }
 
 var (
-	flgConfig   string
-	flgDebug    bool
+	flgConfig string
+	flgDebug  bool
 )
 
 func init() {
@@ -49,6 +50,8 @@ func init() {
 }
 
 func main() {
+	var mqttCli mqtt.Client
+
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
@@ -56,13 +59,22 @@ func main() {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	}
 
-	appID := "ai.ospa.homepresence"
+	appID := "xyz.kaza.homepresence"
 
 	cfg, err := NewConfig(flgConfig)
 	if err != nil {
 		log.Fatal().
 			Str("func", "main").
 			Str("exec", "config").
+			Err(err).
+			Send()
+	}
+
+	st, err := newState(cfg.StatePath)
+	if err != nil {
+		log.Fatal().
+			Str("func", "main").
+			Str("exec", "newState").
 			Err(err).
 			Send()
 	}
@@ -77,8 +89,7 @@ func main() {
 	}
 	dev := &devices[0]
 
-	appToken, err := getAppToken(dev, appID)
-	if err != nil {
+	if err := getAppToken(st, dev, appID); err != nil {
 		log.Fatal().
 			Str("func", "main").
 			Str("exec", "freebox-get-app-token").
@@ -86,7 +97,7 @@ func main() {
 			Send()
 	}
 
-	sessionToken, err := getSessionToken(dev, appID, *appToken)
+	sessionToken, err := getSessionToken(st, dev, appID)
 	if err != nil {
 		log.Fatal().
 			Str("func", "main").
@@ -98,13 +109,16 @@ func main() {
 	states := map[string]string{}
 
 	// MQTT
-	mqttCli, err := mqttInit(cfg.Mqtt.Host, cfg.Mqtt.Port, cfg.Mqtt.Username, cfg.Mqtt.Password)
-	if err != nil {
-		log.Fatal().
-			Str("func", "main").
-			Str("exec", "mqttInit").
-			Err(err).
-			Send()
+	if cfg.Mqtt.Enabled {
+		mqttCli, err = mqttInit(cfg.Mqtt.Host, cfg.Mqtt.Port, cfg.Mqtt.Username, cfg.Mqtt.Password)
+		if err != nil {
+			log.Fatal().
+				Str("func", "main").
+				Str("exec", "mqttInit").
+				Err(err).
+				Send()
+		}
+		log.Debug().Msg("connected to MQTT")
 	}
 
 	probe := func() {
@@ -119,7 +133,7 @@ func main() {
 				Send()
 		}
 		if rerr != nil {
-			if err := removeSessionTokenFile(); err != nil {
+			if err := st.removeSessionTokenFile(); err != nil {
 				log.Fatal().
 					Str("func", "main").
 					Str("exec", "freebox-remove-session-token").
@@ -127,7 +141,7 @@ func main() {
 					Send()
 			}
 
-			sessionToken, err := getSessionToken(dev, appID, *appToken)
+			sessionToken, err := getSessionToken(st, dev, appID)
 			if err != nil {
 				log.Fatal().
 					Str("func", "main").
@@ -146,15 +160,26 @@ func main() {
 			}
 		}
 
+		if cfg.Mqtt.Enabled && !mqttCli.IsConnected() {
+			mqttCli, err = mqttInit(cfg.Mqtt.Host, cfg.Mqtt.Port, cfg.Mqtt.Username, cfg.Mqtt.Password)
+			if err != nil {
+				log.Error().
+					Str("func", "main").
+					Str("exec", "mqttInit").
+					Err(err).
+					Send()
+				return
+			}
+			log.Debug().Msg("connected to MQTT")
+		}
+
 		tmpStates := make(map[string]stateVal)
 
 		for _, r := range result.Result {
-			log.Debug().Any("result", r)
+			log.Debug().
+				Msgf("%s (%s) %s => %s", r.Hostname, r.Mac, r.Host.HostType, r.Host.AccessPoint.ConnectivityType)
 
 			if r.Host.HostType == "smartphone" {
-				log.Debug().
-					Msgf("%s (%s) => %s", r.Hostname, r.Mac, r.Host.AccessPoint.ConnectivityType)
-
 				id := strings.Replace(r.Host.ID, "ether-", "", 1)
 				id = strings.ReplaceAll(id, ":", "")
 
@@ -183,31 +208,33 @@ func main() {
 			} else {
 				publish = true
 
-				topic := fmt.Sprintf("homeassistant/device_tracker/%s/config", k)
-				payload := mqttPayload{
-					StateTopic:     stateTopic,
-					Name:           v.name,
-					PayloadHome:    "home",
-					PayloadNotHome: "not_home",
-					Icon: "mdi:cellphone",
-					UniqueId: k,
-				}
-				payloadJson, err := json.Marshal(payload)
-				if err != nil {
-					log.Error().
-						Str("func", "main").
-						Str("exec", "mqtt-payload-json").
-						Err(err).
-						Send()
-					break
-				}
+				if cfg.Mqtt.Enabled {
+					topic := fmt.Sprintf("homeassistant/device_tracker/%s/config", k)
+					payload := mqttPayload{
+						StateTopic:     stateTopic,
+						Name:           v.name,
+						PayloadHome:    "home",
+						PayloadNotHome: "not_home",
+						Icon:           "mdi:cellphone",
+						UniqueId:       k,
+					}
+					payloadJson, err := json.Marshal(payload)
+					if err != nil {
+						log.Error().
+							Str("func", "main").
+							Str("exec", "mqtt-payload-json").
+							Err(err).
+							Send()
+						break
+					}
 
-				log.Info().Msgf("mqtt publish config for device %s", v.name)
+					log.Info().Msgf("mqtt publish config for device %s", v.name)
 
-				mqttPublish(mqttCli, topic, payloadJson)
+					mqttPublish(mqttCli, topic, payloadJson)
+				}
 			}
 
-			if publish {
+			if cfg.Mqtt.Enabled && publish {
 				log.Info().Msgf("mqtt publish state for device %s (%s)", v.name, v.status)
 
 				mqttPublish(mqttCli, stateTopic, []byte(v.status))
@@ -237,7 +264,9 @@ func main() {
 	signal.Notify(quit, os.Interrupt)
 	<-quit
 
-	mqttCli.Disconnect(250)
+	if cfg.Mqtt.Enabled {
+		mqttCli.Disconnect(250)
+	}
 
 	ticker.Stop()
 	done <- true

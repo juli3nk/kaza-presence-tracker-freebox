@@ -1,0 +1,37 @@
+{
+  "name": "Presence Tracker in DevContainer",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".",
+    "args": {
+      "GO_VERSION": "1.22",
+      "GROUP_ID_DOCKER": "131"
+		}
+  },
+  "mounts": [
+    "type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock",
+    "type=bind,source=${localEnv:HOME}/Data/presence-tracker,target=/srv/presence",
+		"type=bind,source=${localEnv:HOME}/.docker/config.json,target=/root/.docker/config.json"
+  ],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.profiles.linux": {
+          "bash (login)": {
+            "path": "bash",
+            "args": ["-l"]
+          }
+        },
+        "terminal.integrated.defaultProfile.windows": "bash (login)"
+      },
+      "extensions": [
+        "visualstudioexptteam.vscodeintellicode",
+        "esbenp.prettier-vscode",
+        "editorconfig.editorconfig",
+        "mads-hartmann.bash-ide-vscode",
+				"rogalmic.bash-debug"
+      ]
+    }
+  },
+	"workspaceMount": "type=bind,source=${localWorkspaceFolder},target=${containerWorkspaceFolder}"
+}
