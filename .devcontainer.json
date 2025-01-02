@@ -1,0 +1,60 @@
+{
+  "name": "Freebox Presence Tracker For Home Assistant",
+  "image": "ghcr.io/home-assistant/devcontainer:addons",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "dockerDashComposeVersion": "none"
+    },
+    "ghcr.io/devcontainers/features/go:1": {
+      "version": "1.23"
+    },
+    "ghcr.io/juli3nk/devcontainer-features/dagger-asdf:1": {}
+  },
+  "forwardPorts": [
+    8080
+  ],
+  "containerEnv": {
+    "SHUTUP": "1",
+    "STOPIT": "1"
+  },
+  "mounts": [
+    "type=bind,source=${localEnv:HOME}/Data/presence-tracker,target=/srv/presence"
+  ],
+  "appPort": [
+    "7123:8123",
+    "7357:4357"
+  ],
+  "postStartCommand": "bash devcontainer_bootstrap",
+  "runArgs": ["-e", "GIT_EDITOR=code --wait", "--privileged"],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated": {
+          "profiles.linux": {
+            "bash (login)": {
+              "path": "bash",
+              "args": ["-l"]
+            }
+          },
+          "defaultProfile.windows": "bash (login)"
+        },
+        "editor": {
+          "formatOnPaste": false,
+          "formatOnSave": true,
+          "formatOnType": true
+        },
+        "files.trimTrailingWhitespace": true
+      },
+      "extensions": [
+        "editorconfig.editorconfig",
+        "esbenp.prettier-vscode",
+        "mads-hartmann.bash-ide-vscode",
+				"rogalmic.bash-debug",
+        "timonwong.shellcheck",
+        "visualstudioexptteam.vscodeintellicode",
+        "vscode.makefile-tools"
+      ]
+    }
+  },
+	"workspaceMount": "type=bind,source=${localWorkspaceFolder},target=${containerWorkspaceFolder}"
+}
