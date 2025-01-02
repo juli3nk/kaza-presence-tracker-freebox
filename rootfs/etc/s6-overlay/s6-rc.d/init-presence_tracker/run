@@ -1,0 +1,19 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Home Assistant Community Add-on: Presence Tracker
+# Configures Presence Tracker
+# ==============================================================================
+
+PT_CONFIG_PATH="/etc/presence-tracker"
+
+if bashio::services.available "mqtt"; then
+	bashio::var.json \
+		mqtt_host "$(bashio::services mqtt "host")" \
+		mqtt_port "$(bashio::services mqtt "port")" \
+		mqtt_username "$(bashio::services mqtt "username")" \
+		mqtt_password "$(bashio::services mqtt "password")" \
+		| tempio \
+			-template "${PT_CONFIG_PATH}/templates/config.gtpl" \
+			-out "${PT_CONFIG_PATH}/config.hcl"
+fi

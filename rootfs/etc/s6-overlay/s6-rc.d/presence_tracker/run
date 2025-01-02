@@ -1,0 +1,9 @@
+#!/command/with-contenv bashio
+# ==============================================================================
+# Home Assistant Community Add-on: Presence Tracker
+# Runs the Presence Tracker daemon
+# ==============================================================================
+
+bashio::log.info "Starting Presence Tracker...."
+
+exec /usr/local/bin/presence-tracker -config /etc/presence-tracker/config.hcl
