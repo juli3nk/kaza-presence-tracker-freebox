@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Call Dagger Function to build
+        uses: dagger/dagger-for-github@v7
+        with:
+          verb: call
+          args: --source . --registry-address ghcr.io --registry-username ${{ github.actor }} --registry-secret env:GITHUB_TOKEN build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
