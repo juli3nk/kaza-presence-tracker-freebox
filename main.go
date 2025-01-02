@@ -9,33 +9,13 @@ import (
 	"strings"
 	"time"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/juli3nk/go-freebox"
+	"github.com/juli3nk/kaza-presence-tracker-freebox/internal/config"
+	"github.com/juli3nk/kaza-presence-tracker-freebox/internal/fbxapp"
+	"github.com/juli3nk/kaza-presence-tracker-freebox/internal/mqtt"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
-
-type stateVal struct {
-	mac    string
-	name   string
-	status string
-}
-
-// type hassDevice struct {
-// 	Connections []string `json:"connections"`
-// 	Name        string   `json:"name"`
-// }
-
-type mqttPayload struct {
-	StateTopic     string `json:"state_topic"`
-	Name           string `json:"name"`
-	PayloadHome    string `json:"payload_home"`
-	PayloadNotHome string `json:"payload_not_home"`
-	//Device              hassDevice `json:"device,omitempty"`
-	Icon                string `json:"icon"`
-	UniqueId            string `json:"unique_id"`
-	JsonAttributesTopic string `json:"json_attributes_topic,omitempty"`
-}
 
 var (
 	flgConfig string
@@ -50,7 +30,7 @@ func init() {
 }
 
 func main() {
-	var mqttCli mqtt.Client
+	mqttCli := mqtt.New()
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
@@ -61,20 +41,11 @@ func main() {
 
 	appID := "xyz.kaza.homepresence"
 
-	cfg, err := NewConfig(flgConfig)
+	cfg, err := config.New(flgConfig)
 	if err != nil {
 		log.Fatal().
 			Str("func", "main").
 			Str("exec", "config").
-			Err(err).
-			Send()
-	}
-
-	st, err := newState(cfg.StatePath)
-	if err != nil {
-		log.Fatal().
-			Str("func", "main").
-			Str("exec", "newState").
 			Err(err).
 			Send()
 	}
@@ -89,15 +60,24 @@ func main() {
 	}
 	dev := &devices[0]
 
-	if err := getAppToken(st, dev, appID); err != nil {
+	app, err := fbxapp.New(appID, dev, cfg.StatePath)
+	if err != nil {
 		log.Fatal().
 			Str("func", "main").
-			Str("exec", "freebox-get-app-token").
+			Str("exec", "freebox-app-new").
 			Err(err).
 			Send()
 	}
 
-	sessionToken, err := getSessionToken(st, dev, appID)
+	if err := app.Create("Presence Tracker", "0.1.0", "Kaza"); err != nil {
+		log.Fatal().
+			Str("func", "main").
+			Str("exec", "freebox-app-create").
+			Err(err).
+			Send()
+	}
+
+	sessionToken, err := app.GetSessionToken()
 	if err != nil {
 		log.Fatal().
 			Str("func", "main").
@@ -106,12 +86,9 @@ func main() {
 			Send()
 	}
 
-	states := map[string]string{}
-
 	// MQTT
 	if cfg.Mqtt.Enabled {
-		mqttCli, err = mqttInit(cfg.Mqtt.Host, cfg.Mqtt.Port, cfg.Mqtt.Username, cfg.Mqtt.Password)
-		if err != nil {
+		if err = mqttCli.Init(cfg.Mqtt.Host, cfg.Mqtt.Port, cfg.Mqtt.Username, cfg.Mqtt.Password); err != nil {
 			log.Fatal().
 				Str("func", "main").
 				Str("exec", "mqttInit").
@@ -121,8 +98,22 @@ func main() {
 		log.Debug().Msg("connected to MQTT")
 	}
 
+	states := map[string]string{}
+
 	probe := func() {
 		log.Debug().Msg("probing")
+
+		if cfg.Mqtt.Enabled && !mqttCli.IsConnected() {
+			if err = mqttCli.Init(cfg.Mqtt.Host, cfg.Mqtt.Port, cfg.Mqtt.Username, cfg.Mqtt.Password); err != nil {
+				log.Error().
+					Str("func", "main").
+					Str("exec", "mqttInit").
+					Err(err).
+					Send()
+				return
+			}
+			log.Debug().Msg("connected to MQTT")
+		}
 
 		result, rerr, err := dev.DynamicLease(*sessionToken)
 		if err != nil {
@@ -133,15 +124,7 @@ func main() {
 				Send()
 		}
 		if rerr != nil {
-			if err := st.removeSessionTokenFile(); err != nil {
-				log.Fatal().
-					Str("func", "main").
-					Str("exec", "freebox-remove-session-token").
-					Err(err).
-					Send()
-			}
-
-			sessionToken, err := getSessionToken(st, dev, appID)
+			sessionToken, err := app.GetSessionToken()
 			if err != nil {
 				log.Fatal().
 					Str("func", "main").
@@ -158,19 +141,6 @@ func main() {
 					Err(err).
 					Send()
 			}
-		}
-
-		if cfg.Mqtt.Enabled && !mqttCli.IsConnected() {
-			mqttCli, err = mqttInit(cfg.Mqtt.Host, cfg.Mqtt.Port, cfg.Mqtt.Username, cfg.Mqtt.Password)
-			if err != nil {
-				log.Error().
-					Str("func", "main").
-					Str("exec", "mqttInit").
-					Err(err).
-					Send()
-				return
-			}
-			log.Debug().Msg("connected to MQTT")
 		}
 
 		tmpStates := make(map[string]stateVal)
@@ -210,6 +180,7 @@ func main() {
 
 				if cfg.Mqtt.Enabled {
 					topic := fmt.Sprintf("homeassistant/device_tracker/%s/config", k)
+
 					payload := mqttPayload{
 						StateTopic:     stateTopic,
 						Name:           v.name,
@@ -230,21 +201,38 @@ func main() {
 
 					log.Info().Msgf("mqtt publish config for device %s", v.name)
 
-					mqttPublish(mqttCli, topic, payloadJson)
+					if err := mqttCli.Publish(topic, payloadJson); err != nil {
+						log.Error().
+							Str("func", "main").
+							Str("exec", "mqtt-publish-device-config").
+							Err(err).
+							Send()
+						break
+					}
 				}
 			}
 
 			if cfg.Mqtt.Enabled && publish {
 				log.Info().Msgf("mqtt publish state for device %s (%s)", v.name, v.status)
 
-				mqttPublish(mqttCli, stateTopic, []byte(v.status))
+				if err := mqttCli.Publish(stateTopic, []byte(v.status)); err != nil {
+					log.Error().
+						Str("func", "main").
+						Str("exec", "mqtt-publish-device-state").
+						Err(err).
+						Send()
+					break
+				}
+
 				states[k] = v.status
 			}
 		}
 	}
 
 	ticker := time.NewTicker(time.Duration(10) * time.Second)
-	done := make(chan interface{})
+	defer ticker.Stop() // Ensure ticker stops on exit
+
+	done := make(chan struct{}) // Use a `struct{}` for signals (no data)
 
 	probe()
 
@@ -252,22 +240,32 @@ func main() {
 		for {
 			select {
 			case <-done:
-				return
+				return // Exit goroutine
 			case <-ticker.C:
 				probe()
 			}
 		}
 	}()
 
-	// Exit
+	// Handle OS interrupts for graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt)
+
+	// Wait for interrupt signal
 	<-quit
+
+	// Graceful shutdown
+	log.Info().Msg("shutting down gracefully...")
+
+	// Signal the goroutine to exit
+	close(done) // Close the channel (non-blocking signal)
+
+	// Stop ticker
+	ticker.Stop()
 
 	if cfg.Mqtt.Enabled {
 		mqttCli.Disconnect(250)
 	}
 
-	ticker.Stop()
-	done <- true
+	log.Info().Msg("shutdown complete")
 }

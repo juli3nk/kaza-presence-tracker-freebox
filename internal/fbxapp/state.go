@@ -1,4 +1,4 @@
-package main
+package fbxapp
 
 import (
 	"os"
@@ -45,12 +45,4 @@ func (s *state) getSessionTokenFromFile() ([]byte, error) {
 	}
 
 	return data, nil
-}
-
-func (s *state) removeSessionTokenFile() error {
-	if err := os.Remove(filepath.Join(s.path, "session-token.txt")); err != nil {
-		return err
-	}
-
-	return nil
 }

@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"fmt"
@@ -19,7 +19,7 @@ type MqttConfig struct {
 	Password string `hcl:"password,optional"`
 }
 
-func NewConfig(filepath string) (*Config, error) {
+func New(filepath string) (*Config, error) {
 	config := new(Config)
 
 	if err := hclsimple.DecodeFile(filepath, nil, config); err != nil {
