@@ -1,0 +1,28 @@
+{
+  "name": "kaza-presence-tracker-freebox",
+  "engineVersion": "v0.15.1",
+  "sdk": "go",
+  "dependencies": [
+    {
+      "name": "commitlint",
+      "source": "github.com/cloudnative-pg/daggerverse/commitlint",
+      "pin": "fa2e604b785c0ff9252a807097fc1215e10df486"
+    },
+    {
+      "name": "git",
+      "source": "github.com/juli3nk/daggerverse/git",
+      "pin": "62a7cadc00eaa57f6163934c1ef9ceab2ac3a90e"
+    },
+    {
+      "name": "go",
+      "source": "github.com/juli3nk/daggerverse/go",
+      "pin": "a037fcd96bf70a44cc8203b2717b49e380063580"
+    },
+    {
+      "name": "jsonfile",
+      "source": "github.com/juli3nk/daggerverse/jsonfile",
+      "pin": "e98cd1973acdbb2ce9aa1644f75d5884a373a485"
+    }
+  ],
+  "source": ".dagger"
+}
